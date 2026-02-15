@@ -18,8 +18,15 @@ jobs:
       - name: Install Build Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build
+          # 安装 perl (编译 OpenSSL 源码必需) 和 cargo-ndk
+          sudo apt-get install -y cmake ninja-build perl
           cargo install cargo-ndk
+
+      - name: Patch Cargo.toml for OpenSSL
+        run: |
+          # 🌟 关键步骤：强制向项目添加 openssl 依赖并开启 vendored 特性
+          # 这会迫使 openssl-sys 下载源码并使用 NDK 编译，而不是去系统里乱找
+          cargo add openssl --features vendored
 
       - name: Build with Cargo NDK
         run: |
@@ -27,13 +34,15 @@ jobs:
           export ANDROID_NDK_HOME=$ANDROID_NDK_LATEST_HOME
           export ANDROID_NDK_ROOT=$ANDROID_NDK_LATEST_HOME
           
-          # 强制 OpenSSL 源码编译 (解决 openssl-sys 错误)
-          export OPENSSL_STATIC=1
-          export OPENSSL_NO_VENDOR=0
-          
-          # 执行交叉编译
+          # 开始交叉编译
+          # 我们不再需要设置 OPENSSL_DIR，因为 vendored 模式会自动处理一切
           cargo ndk -t aarch64-linux-android --platform 21 build --release
-        env:
+
+      - name: Upload Binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: skills-termux-bin
+          path: target/aarch64-linux-android/release/skills
           # 明确设置 OpenSSL 环境变量
           OPENSSL_DIR: ""
 
