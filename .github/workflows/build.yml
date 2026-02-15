@@ -43,6 +43,15 @@ jobs:
         with:
           name: skills-termux-bin
           path: target/aarch64-linux-android/release/skills
+          OPENSSL_NO_VENDOR: 0
+          # 某些 crate 需要明确这个变量来启用内置编译
+          OPENSSL_DIR: "" 
+
+      - name: Upload Binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: skills-termux-bin
+          path: target/aarch64-linux-android/release/skills
           cargo ndk -t aarch64-linux-android --platform 21 build --release
           
       # 5. 上传生成的二进制文件
