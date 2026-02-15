@@ -23,59 +23,20 @@ jobs:
 
       - name: Build with Cargo NDK
         run: |
+          # 统一 NDK 路径
           export ANDROID_NDK_HOME=$ANDROID_NDK_LATEST_HOME
           export ANDROID_NDK_ROOT=$ANDROID_NDK_LATEST_HOME
           
-          # 核心修正 1：设置环境变量，强制让 openssl-sys 自动下载并编译源码（vendored）
+          # 强制 OpenSSL 源码编译 (解决 openssl-sys 错误)
           export OPENSSL_STATIC=1
+          export OPENSSL_NO_VENDOR=0
           
-          # 核心修正 2：通过 --features 开启 vendored openssl（如果项目支持）
-          # 或者通过 RUSTFLAGS 强制链接。这里我们采用最稳妥的环境变量法。
+          # 执行交叉编译
           cargo ndk -t aarch64-linux-android --platform 21 build --release
         env:
-          # 告诉 openssl-sys 编译自己的版本，不要去 Ubuntu 系统里找
-          OPENSSL_NO_VENDOR: 0
-          # 某些 crate 需要明确这个变量来启用内置编译
-          OPENSSL_DIR: "" 
+          # 明确设置 OpenSSL 环境变量
+          OPENSSL_DIR: ""
 
-      - name: Upload Binary
-        uses: actions/upload-artifact@v4
-        with:
-          name: skills-termux-bin
-          path: target/aarch64-linux-android/release/skills
-          OPENSSL_NO_VENDOR: 0
-          # 某些 crate 需要明确这个变量来启用内置编译
-          OPENSSL_DIR: "" 
-
-      - name: Upload Binary
-        uses: actions/upload-artifact@v4
-        with:
-          name: skills-termux-bin
-          path: target/aarch64-linux-android/release/skills
-          cargo ndk -t aarch64-linux-android --platform 21 build --release
-          
-      # 5. 上传生成的二进制文件
-      - name: Upload Binary
-        uses: actions/upload-artifact@v4
-        with:
-          name: skills-termux-bin
-          # 产物路径在 target 的对应架构目录下
-          path: target/aarch64-linux-android/release/skills
-          CC_aarch64_linux_android: aarch64-linux-android21-clang
-          AR_aarch64_linux_android: aarch64-linux-android-ar
-
-      - name: Upload Binary
-        uses: actions/upload-artifact@v4
-        with:
-          name: skills-termux-bin
-          path: target/aarch64-linux-android/release/skills
-
-      # 5. 上传二进制产物
-      - name: Upload Binary
-        uses: actions/upload-artifact@v4
-        with:
-          name: skills-termux-bin
-          path: target/aarch64-linux-android/release/skills
       - name: Upload Binary
         uses: actions/upload-artifact@v4
         with:
