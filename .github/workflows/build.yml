@@ -1,0 +1,41 @@
+name: Remote Build Skills for Termux
+
+on:
+  workflow_dispatch: # 允许手动点击按钮触发
+
+jobs:
+  cross-compile:
+    runs-on: ubuntu-latest
+    steps:
+      # 1. 检出源码（直接指定目标仓库）
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+        with:
+          repository: labiium/skills
+          ref: main # 或者指定具体的 commit/tag
+
+      # 2. 配置 Rust 环境
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      # 3. 安装交叉编译工具
+      - name: Install Build Tools
+        run: |
+          sudo apt-get update
+          # GitHub 环境自带 NDK，但我们需要 cargo-ndk 简化操作
+          cargo install cargo-ndk
+
+      # 4. 执行交叉编译
+      - name: Build with Cargo NDK
+        run: |
+          # Termux 环境通常对应 Android API Level 21
+          cargo ndk -t arm64-v8a -p 21 build --release
+
+      # 5. 上传二进制产物
+      - name: Upload Binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: skills-termux-bin
+          path: target/aarch64-linux-android/release/skills
