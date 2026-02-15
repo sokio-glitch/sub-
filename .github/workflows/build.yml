@@ -6,34 +6,42 @@ on:
 jobs:
   cross-compile:
     runs-on: ubuntu-latest
-    # 添加权限声明，确保 Actions 有权操作
-    permissions:
-      contents: read
-      
     steps:
-      # 1. 直接使用 git 命令克隆（手动绕过 checkout 插件）
       - name: Manual Clone Source Code
-        run: |
-          git clone --depth 1 https://github.com/labiium/skills.git .
-          # 顺便确认一下我们拿到了代码
-          ls -R
+        run: git clone --depth 1 https://github.com/labiium/skills.git .
 
-      # 2. 配置 Rust 环境
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-linux-android
 
-      # 3. 安装工具（注意：ubuntu-latest 自带 NDK，通常在 /usr/local/lib/android/sdk/ndk-bundle）
-      - name: Install Build Tools
+      - name: Install Build Dependencies
         run: |
+          sudo apt-get update
+          # 安装 cmake 和 ninja，很多底层 Rust 库（如 aws-lc-sys）在 Android 交叉编译时需要它们
+          sudo apt-get install -y cmake ninja-build
           cargo install cargo-ndk
 
-      # 4. 执行交叉编译
       - name: Build with Cargo NDK
         run: |
-          # 指定 API 21 以获得最大兼容性
-          cargo ndk -t arm64-v8a -p 21 build --release
+          # 1. 明确指向 GitHub Actions 预装的 NDK 路径
+          export ANDROID_NDK_HOME=$ANDROID_NDK_LATEST_HOME
+          
+          # 2. 这里的参数非常关键：
+          # -t aarch64-linux-android: 目标架构
+          # -p 21: Termux 推荐的 API Level
+          # --: 后接标准的 cargo 参数
+          cargo ndk -t aarch64-linux-android -p 21 build --release
+        env:
+          # 有些库在编译 C 代码时需要明确指定编译器
+          CC_aarch64_linux_android: aarch64-linux-android21-clang
+          AR_aarch64_linux_android: aarch64-linux-android-ar
+
+      - name: Upload Binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: skills-termux-bin
+          path: target/aarch64-linux-android/release/skills
 
       # 5. 上传二进制产物
       - name: Upload Binary
