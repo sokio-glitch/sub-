@@ -1,39 +1,48 @@
 name: Remote Build Skills for Termux
 
 on:
-  workflow_dispatch:
+  workflow_dispatch: # 允许手动点击按钮触发
 
 jobs:
   cross-compile:
     runs-on: ubuntu-latest
     steps:
+      # 1. 匿名克隆源码到当前目录
       - name: Manual Clone Source Code
         run: git clone --depth 1 https://github.com/labiium/skills.git .
 
+      # 2. 安装 Rust 环境及 Android 目标平台
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-linux-android
 
+      # 3. 安装底层编译依赖
+      # cmake 和 ninja 是编译加密库（如 aws-lc-sys）所必须的
       - name: Install Build Dependencies
         run: |
           sudo apt-get update
-          # 安装 cmake 和 ninja，很多底层 Rust 库（如 aws-lc-sys）在 Android 交叉编译时需要它们
           sudo apt-get install -y cmake ninja-build
           cargo install cargo-ndk
 
+      # 4. 执行交叉编译
       - name: Build with Cargo NDK
         run: |
-          # 1. 明确指向 GitHub Actions 预装的 NDK 路径
+          # 统一 NDK 环境变量，防止 cargo-ndk 报版本不匹配的 Panic
           export ANDROID_NDK_HOME=$ANDROID_NDK_LATEST_HOME
+          export ANDROID_NDK_ROOT=$ANDROID_NDK_LATEST_HOME
           
-          # 2. 这里的参数非常关键：
-          # -t aarch64-linux-android: 目标架构
-          # -p 21: Termux 推荐的 API Level
-          # --: 后接标准的 cargo 参数
-          cargo ndk -t aarch64-linux-android -p 21 build --release
-        env:
-          # 有些库在编译 C 代码时需要明确指定编译器
+          # 核心修正：使用 --platform 21 而不是 -p 21
+          # 这样会正确识别为 Android API Level，而不会被误认为是一个名为 "21" 的项目包
+          cargo ndk -t aarch64-linux-android --platform 21 build --release
+          
+      # 5. 上传生成的二进制文件
+      - name: Upload Binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: skills-termux-bin
+          # 产物路径在 target 的对应架构目录下
+          path: target/aarch64-linux-android/release/skills
           CC_aarch64_linux_android: aarch64-linux-android21-clang
           AR_aarch64_linux_android: aarch64-linux-android-ar
 
