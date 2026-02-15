@@ -7,33 +7,45 @@ jobs:
   cross-compile:
     runs-on: ubuntu-latest
     steps:
+      # 1. 下载源码
       - name: Manual Clone Source Code
         run: git clone --depth 1 https://github.com/labiium/skills.git .
 
+      # 2. 配置 Rust
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-linux-android
 
+      # 3. 安装依赖 (Perl 是编译 OpenSSL 必须的)
       - name: Install Build Dependencies
         run: |
           sudo apt-get update
-          # 安装 perl (编译 OpenSSL 源码必需) 和 cargo-ndk
           sudo apt-get install -y cmake ninja-build perl
           cargo install cargo-ndk
 
+      # 4. 关键修正：注入 OpenSSL 依赖
+      # 这会强制项目使用 vendored 模式（自带源码），彻底解决找不到 OpenSSL 的问题
       - name: Patch Cargo.toml for OpenSSL
         run: |
-          # 🌟 关键步骤：强制向项目添加 openssl 依赖并开启 vendored 特性
-          # 这会迫使 openssl-sys 下载源码并使用 NDK 编译，而不是去系统里乱找
           cargo add openssl --features vendored
 
+      # 5. 交叉编译
       - name: Build with Cargo NDK
         run: |
-          # 统一 NDK 路径
           export ANDROID_NDK_HOME=$ANDROID_NDK_LATEST_HOME
           export ANDROID_NDK_ROOT=$ANDROID_NDK_LATEST_HOME
           
+          # 开始编译
+          cargo ndk -t aarch64-linux-android --platform 21 build --release
+
+      # 6. 上传结果 (已修复格式错误)
+      - name: Upload Binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: skills-termux-bin
+          path: target/aarch64-linux-android/release/skills
+          overwrite: true  # 允许覆盖同名文件，防止报 Conflict 错误
           # 开始交叉编译
           # 我们不再需要设置 OPENSSL_DIR，因为 vendored 模式会自动处理一切
           cargo ndk -t aarch64-linux-android --platform 21 build --release
