@@ -1,48 +1,73 @@
-name: Remote Build Skills for Termux
+name: Build Skills (Android & Windows)
 
 on:
   workflow_dispatch:
 
 jobs:
-  cross-compile:
+  # Job 1: 原有的 Android 交叉编译 (保持不变)
+  build-android:
+    name: Build for Android (Termux)
     runs-on: ubuntu-latest
     steps:
-      # 1. 下载源码
       - name: Manual Clone Source Code
         run: git clone --depth 1 https://github.com/labiium/skills.git .
 
-      # 2. 配置 Rust
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-linux-android
 
-      # 3. 安装依赖 (Perl 是编译 OpenSSL 必须的)
       - name: Install Build Dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y cmake ninja-build perl
           cargo install cargo-ndk
 
-      # 4. 关键修正：注入 OpenSSL 依赖
-      # 这会强制项目使用 vendored 模式（自带源码），彻底解决找不到 OpenSSL 的问题
       - name: Patch Cargo.toml for OpenSSL
         run: |
           cargo add openssl --features vendored
 
-      # 5. 交叉编译
       - name: Build with Cargo NDK
         run: |
           export ANDROID_NDK_HOME=$ANDROID_NDK_LATEST_HOME
           export ANDROID_NDK_ROOT=$ANDROID_NDK_LATEST_HOME
-          
-          # 开始编译
           cargo ndk -t aarch64-linux-android --platform 21 build --release
 
-      # 6. 上传结果 (已修复格式错误)
-      - name: Upload Binary
+      - name: Upload Android Binary
         uses: actions/upload-artifact@v4
         with:
           name: skills-termux-bin
           path: target/aarch64-linux-android/release/skills
-          overwrite: true  # 允许覆盖同名文件，防止报 Conflict 错误
+          overwrite: true
+
+  # Job 2: 新增的 Windows 编译
+  build-windows:
+    name: Build for Windows (x64)
+    runs-on: windows-latest  # 使用原生 Windows 环境
+    steps:
+      - name: Manual Clone Source Code
+        # Windows PowerShell 中 git clone . 同样适用
+        run: git clone --depth 1 https://github.com/labiium/skills.git .
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc # Windows 标准目标
+
+      # Windows 编译 OpenSSL (vendored) 也需要 Perl，GitHub Windows 镜像通常自带 Strawberry Perl
+      # 这里我们通过 cargo add 同样开启 vendored，这样生成的 exe 是静态链接的，无需用户安装 OpenSSL DLL
+      - name: Patch Cargo.toml for OpenSSL
+        run: |
+          cargo add openssl --features vendored
+
+      - name: Build Release
+        # 不需要 cargo-ndk，直接用 cargo build
+        run: cargo build --release --target x86_64-pc-windows-msvc
+
+      - name: Upload Windows Binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: skills-windows-bin
+          # 注意 Windows 下可执行文件有 .exe 后缀，且路径结构略有不同
+          path: target/x86_64-pc-windows-msvc/release/skills.exe
+          overwrite: true
