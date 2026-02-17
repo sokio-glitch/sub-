@@ -1,4 +1,4 @@
-name: Build LobeChat Standalone
+name: Build LobeChat via Docker
 
 on:
   workflow_dispatch:
@@ -13,28 +13,23 @@ jobs:
           git clone https://github.com/lobehub/lobe-chat.git
           cd lobe-chat
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
+      - name: Build Docker Image
+        run: |
+          cd lobe-chat
+          docker build -t lobe-chat .
+
+      - name: Extract standalone build
+        run: |
+          docker create --name temp lobe-chat
+          docker cp temp:/app/.next ./output
+          docker rm temp
+          zip -r lobe-chat-phone.zip output
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
         with:
-          node-version: 20
-
-      - name: Enable pnpm v9
-        run: |
-          corepack enable
-          corepack prepare pnpm@9 --activate
-          pnpm -v
-
-      - name: Install dependencies
-        run: |
-          cd lobe-chat
-          pnpm install --no-frozen-lockfile
-
-      - name: Build (standalone)
-        run: |
-          cd lobe-chat
-          export NODE_OPTIONS="--max-old-space-size=4096"
-          pnpm build
-
+          name: lobe-chat-phone
+          path: lobe-chat-phone.zip
       - name: Prepare standalone package
         run: |
           cd lobe-chat
