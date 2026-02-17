@@ -1,4 +1,4 @@
-name: Build LobeChat for Termux (Force Standalone)
+name: Build LobeChat for Termux (V4 - Fix Hidden Files)
 
 on:
   workflow_dispatch:
@@ -28,53 +28,52 @@ jobs:
       - name: Install Dependencies
         run: pnpm install
 
-      # 🔥 核心修复：添加 DOCKER=true 环境变量
-      # 这会触发 LobeChat 的 next.config.mjs 开启 output: 'standalone'
-      - name: Build Standalone (Bypass DB Checks)
+      - name: Build Standalone
         run: npx next build
         env:
-          # 关键变量：告诉 LobeChat 这是一个 Docker/Standalone 构建
           DOCKER: true
-          
-          # 显式指定（双重保险）
           NEXT_OUTPUT: standalone
-          
-          # 绕过数据库检查
           SKIP_ENV_VALIDATION: true
-          
-          # 必须的 Dummy 变量
           AUTH_SECRET: "dummy_secret_for_build_process_32_chars_long"
           KEY_VAULTS_SECRET: "dummy_secret_for_build_process_32_chars_long"
           DATABASE_URL: "postgresql://postgres:password@localhost:5432/lobe"
           APP_URL: "http://localhost:3000"
-          
-          # 增加内存限制，防止构建崩
           NODE_OPTIONS: "--max-old-space-size=8192"
 
       - name: Package Application
         run: |
           echo "📦 开始打包..."
-          # 检查 standalone 是否存在 (调试用)
-          ls -R .next/standalone || echo "❌ Standalone 目录依然不存在！"
-          
           mkdir -p package/public
           mkdir -p package/.next/static
 
-          # 1. 复制 Standalone 核心
-          # 使用 cp -r 复制 .next/standalone 下的所有内容（包含 node_modules 等）
-          cp -r .next/standalone/* package/
+          # --- 🔴 关键修复 V4 START ---
+          # 之前的 cp * 漏掉了 .next 文件夹
+          # 我们现在显式复制所有内容
+          
+          # 1. 复制 standalone 下的核心 .next 文件夹 (包含 BUILD_ID)
+          cp -r .next/standalone/.next package/
+          
+          # 2. 复制 server.js 和其他文件
+          cp .next/standalone/server.js package/
+          cp .next/standalone/package.json package/ || true
+          
+          # 3. 复制依赖 (node_modules)
+          cp -r .next/standalone/node_modules package/
+          # --- 🔴 关键修复 V4 END ---
 
-          # 2. 复制静态资源 (Next.js 默认不打入 standalone，必须手动补)
-          # 注意：有时候 .next/static 已经在 standalone/.next/static 里了，但为了保险覆盖一次
-          cp -r .next/static package/.next/
+          # 4. 补全静态资源 (Next.js 默认不打包 static 到 standalone)
+          # 注意：这里使用 -n (no-clobber) 防止覆盖已有的文件，只补充缺失的
+          cp -rn .next/static/* package/.next/static/
+          
+          # 5. 复制 Public 目录
           cp -r public package/
 
-          # 3. 修复 Termux 兼容性
+          # 6. 删除 x64 sharp (Termux 需自行安装)
           echo "🚫 删除 x64 架构的 sharp..."
           rm -rf package/node_modules/sharp
           rm -rf package/node_modules/@img/sharp-libvips-linux-x64
 
-          # 4. 压缩
+          # 7. 压缩
           echo "🗜️ 正在压缩..."
           cd package
           tar -czvf ../lobe-termux.tar.gz .
@@ -83,51 +82,6 @@ jobs:
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: lobechat-termux-final-v3
-          path: lobe-termux.tar.gz
-          retention-days: 3
-          
-          # 必须变量 (骗过 Next.js 的启动检查)
-          AUTH_SECRET: "dummy_secret_for_build_process_32_chars_long"
-          KEY_VAULTS_SECRET: "dummy_secret_for_build_process_32_chars_long"
-          
-          # 必须变量 (防止构建时连接数据库报错)
-          # 使用 postgres 协议，但指向无效地址也没关系，因为我们跳过了 migrate
-          DATABASE_URL: "postgresql://postgres:password@localhost:5432/lobe"
-          APP_URL: "http://localhost:3000"
-          
-          # 核心：跳过环境变量格式校验
-          SKIP_ENV_VALIDATION: true
-
-      - name: Package Application
-        run: |
-          echo "📦 开始打包..."
-          mkdir -p package/public
-          mkdir -p package/.next/static
-
-          # 1. 复制 Standalone 核心
-          # 这一步可能会有深层目录结构，我们使用 rsync 或 cp 递归合并
-          # 通常结构是 .next/standalone/node_modules 和 .next/standalone/package.json
-          cp -r .next/standalone/* package/
-
-          # 2. 复制静态资源 (Next.js 默认不把这些打进 standalone)
-          cp -r .next/static package/.next/
-          cp -r public package/
-
-          # 3. 修复 Termux 兼容性 (删除 x64 sharp)
-          echo "🚫 删除 x64 架构的 sharp..."
-          rm -rf package/node_modules/sharp
-          rm -rf package/node_modules/@img/sharp-libvips-linux-x64
-
-          # 4. 压缩
-          echo "🗜️ 正在压缩..."
-          cd package
-          tar -czvf ../lobe-termux.tar.gz .
-          echo "✅ 打包完成！"
-
-      - name: Upload Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: lobechat-termux-final
+          name: lobechat-termux-v4
           path: lobe-termux.tar.gz
           retention-days: 3
