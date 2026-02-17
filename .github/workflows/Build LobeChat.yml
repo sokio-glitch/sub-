@@ -1,4 +1,4 @@
-name: Build LobeChat for Termux (Bun + DB Fix)
+name: Build LobeChat for Termux (Bypass DB)
 
 on:
   workflow_dispatch:
@@ -6,22 +6,6 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    # 1. 新增：启动一个临时的 Postgres 服务
-    # LobeChat 构建脚本需要连接数据库生成 Schema 或迁移，我们给它一个空的 DB 玩
-    services:
-      postgres:
-        image: postgres:latest
-        env:
-          POSTGRES_PASSWORD: password
-          POSTGRES_DB: lobe
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-
     steps:
       - name: Checkout Source Code
         uses: actions/checkout@v4
@@ -29,13 +13,6 @@ jobs:
           repository: lobehub/lobe-chat
           ref: main
           fetch-depth: 1
-
-      # 2. 新增：安装 Bun 环境
-      # 解决 "sh: 1: bun: not found" 错误
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v1
-        with:
-          bun-version: latest
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -51,62 +28,24 @@ jobs:
       - name: Install Dependencies
         run: pnpm install
 
-      - name: Build Standalone
-        run: pnpm build
+      # 🔥 关键修改：直接使用 Next.js 构建，绕过 pnpm build 中的 db:migrate
+      - name: Build Standalone (Bypass DB)
+        run: npx next build
         env:
+          # 告诉 Next.js 生成独立运行包
           NEXT_OUTPUT: standalone
-          SKIP_ENV_VALIDATION: true
           
-          # 认证密钥 (必须提供)
+          # 必须变量 (骗过 Next.js 的启动检查)
           AUTH_SECRET: "dummy_secret_for_build_process_32_chars_long"
           KEY_VAULTS_SECRET: "dummy_secret_for_build_process_32_chars_long"
           
-          # 数据库连接 (指向上面定义的临时服务)
-          # 注意：这里连接的是 localhost:5432 (Github Action 的 Service 会映射到这里)
+          # 必须变量 (防止构建时连接数据库报错)
+          # 使用 postgres 协议，但指向无效地址也没关系，因为我们跳过了 migrate
           DATABASE_URL: "postgresql://postgres:password@localhost:5432/lobe"
-          
           APP_URL: "http://localhost:3000"
-
-      - name: Package Application
-        run: |
-          echo "📦 开始打包..."
-          mkdir -p package/public
-          mkdir -p package/.next/static
-
-          # 复制核心文件
-          cp -r .next/standalone/* package/
-          cp -r .next/static package/.next/
-          cp -r public package/
-
-          # ⚠️ 删除 sharp (Termux ARM64 需自行安装)
-          echo "🚫 删除 x64 架构的 sharp..."
-          rm -rf package/node_modules/sharp
-          rm -rf package/node_modules/@img/sharp-libvips-linux-x64
-
-          # 压缩
-          echo "🗜️ 正在压缩..."
-          cd package
-          tar -czvf ../lobe-termux.tar.gz .
-          echo "✅ 打包完成！"
-
-      - name: Upload Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: lobechat-build-fixed-bun
-          path: lobe-termux.tar.gz
-          retention-days: 3
+          
+          # 核心：跳过环境变量格式校验
           SKIP_ENV_VALIDATION: true
-          
-          # --- 核心修复 START ---
-          # 报错明确指出必须存在 AUTH_SECRET
-          AUTH_SECRET: "dummy_secret_for_build_process_32_chars_long"
-          # 为了保险起见，保留 KEY_VAULTS_SECRET
-          KEY_VAULTS_SECRET: "dummy_secret_for_build_process_32_chars_long"
-          # --- 核心修复 END ---
-
-          # 提供数据库 URL 格式欺骗验证
-          DATABASE_URL: "postgresql://postgres:password@localhost:5432/lobe"
-          APP_URL: "http://localhost:3000"
 
       - name: Package Application
         run: |
@@ -114,22 +53,21 @@ jobs:
           mkdir -p package/public
           mkdir -p package/.next/static
 
-          # 复制核心文件
-          # 注意：有时候 standalone 结构会包含 .next/standalone/lobe-chat，这里直接复制内容
+          # 1. 复制 Standalone 核心
+          # 这一步可能会有深层目录结构，我们使用 rsync 或 cp 递归合并
+          # 通常结构是 .next/standalone/node_modules 和 .next/standalone/package.json
           cp -r .next/standalone/* package/
 
-          # 复制静态资源
+          # 2. 复制静态资源 (Next.js 默认不把这些打进 standalone)
           cp -r .next/static package/.next/
-          
-          # 复制 Public
           cp -r public package/
 
-          # ⚠️ 删除 sharp (Termux 需要自行安装)
+          # 3. 修复 Termux 兼容性 (删除 x64 sharp)
           echo "🚫 删除 x64 架构的 sharp..."
           rm -rf package/node_modules/sharp
           rm -rf package/node_modules/@img/sharp-libvips-linux-x64
 
-          # 压缩
+          # 4. 压缩
           echo "🗜️ 正在压缩..."
           cd package
           tar -czvf ../lobe-termux.tar.gz .
@@ -138,100 +76,6 @@ jobs:
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: lobechat-build-fixed-v2
-          path: lobe-termux.tar.gz
-          retention-days: 3
-          NEXT_OUTPUT: standalone
-          # 依然保留跳过验证，防止校验数据库连接
-          SKIP_ENV_VALIDATION: true
-          
-          # --- 修复部分 START ---
-          # ❌ 必须删除: NEXT_AUTH_SECRET (会导致构建失败)
-          # ✅ 新增: LobeChat v2 使用 LOBE_AUTH_SECRET 作为主密钥
-          LOBE_AUTH_SECRET: "dummy_secret_for_build_process_32_chars_long"
-          # --- 修复部分 END ---
-
-          # 提供其他必要的假变量
-          DATABASE_URL: "postgresql://postgres:password@localhost:5432/lobe"
-          KEY_VAULTS_SECRET: "dummy_secret_for_build_process"
-          APP_URL: "http://localhost:3000"
-
-      # 4. 打包处理 (针对 Termux 的特殊处理)
-      - name: Package Application
-        run: |
-          echo "📦 开始打包..."
-          # 创建目录结构
-          mkdir -p package/public
-          mkdir -p package/.next/static
-
-          # 复制 Standalone 核心文件
-          # 注意：LobeChat 的 standalone 目录结构可能较深，通常在 .next/standalone/lobe-chat 或 .next/standalone
-          # 这里使用通配符确保复制内容正确
-          cp -r .next/standalone/* package/
-
-          # 复制静态资源 (解决样式和脚本丢失)
-          cp -r .next/static package/.next/
-
-          # 复制 Public (解决图标和字体丢失)
-          cp -r public package/
-
-          # ⚠️ 关键：删除 sharp
-          # GitHub Action 是 x64 环境，编译出的 sharp 无法在 Termux (ARM64) 运行
-          # 必须删除，然后在手机上重新安装
-          echo "🚫 删除 x64 架构的 sharp..."
-          rm -rf package/node_modules/sharp
-          rm -rf package/node_modules/@img/sharp-libvips-linux-x64
-
-          # 压缩
-          echo "🗜️ 正在压缩..."
-          cd package
-          tar -czvf ../lobe-termux.tar.gz .
-          echo "✅ 打包完成！"
-
-      # 5. 上传产物
-      - name: Upload Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: lobechat-build-fixed
-          path: lobe-termux.tar.gz
-          retention-days: 3
-        env:
-          NEXT_OUTPUT: standalone
-          # 绕过 T3 Env 或 Zod 的校验
-          SKIP_ENV_VALIDATION: true 
-          # 提供假的必须变量，防止构建崩溃
-          DATABASE_URL: "postgresql://postgres:password@localhost:5432/lobe"
-          KEY_VAULTS_SECRET: "dummy_secret_for_build_process"
-          NEXT_AUTH_SECRET: "dummy_secret_for_build_process"
-          APP_URL: "http://localhost:3000"
-
-      # 4. 打包处理 (解决架构不兼容问题)
-      - name: Package Application
-        run: |
-          echo "📦 开始打包..."
-          mkdir -p package/public
-          mkdir -p package/.next/static
-
-          # 复制核心文件
-          cp -r .next/standalone/* package/
-          # 复制静态资源 (解决样式丢失)
-          cp -r .next/static/* package/.next/static/
-          # 复制 Public (解决图标丢失)
-          cp -r public/* package/public/
-          
-          # ⚠️ 关键：删除 sharp (Linux x64)，防止在手机 (ARM64) 上报错
-          # 我们会在 Termux 脚本里重新安装它
-          rm -rf package/node_modules/sharp
-
-          # 压缩
-          cd package
-          tar -czvf ../lobe-termux.tar.gz .
-          echo "✅ 打包完成！"
-
-      # 5. 上传产物
-      - name: Upload Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: lobechat-build-fixed
+          name: lobechat-termux-final
           path: lobe-termux.tar.gz
           retention-days: 3
