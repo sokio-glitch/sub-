@@ -1,17 +1,18 @@
-name: Build LobeChat
+name: Build LobeChat from Source
 
 on:
-  workflow_dispatch:   # 手动触发
-  push:
-    branches: [ main ]
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - name: Clone LobeChat
+        run: |
+          git clone https://github.com/lobehub/lobe-chat.git
+          cd lobe-chat
+          ls
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v2
@@ -22,19 +23,27 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 18
-          cache: 'pnpm'
 
-      - name: Install dependencies
-        run: pnpm install
+      - name: Install Dependencies
+        run: |
+          cd lobe-chat
+          pnpm install
 
       - name: Build
-        run: pnpm build
-
-      - name: Compress build output
         run: |
+          cd lobe-chat
+          pnpm build
+
+      - name: Compress Build Output
+        run: |
+          cd lobe-chat
           zip -r lobe-chat-build.zip .next public package.json pnpm-lock.yaml
 
-      - name: Upload artifact
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lobe-chat-build
+          path: lobe-chat/lobe-chat-build.zip      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: lobe-chat-build
