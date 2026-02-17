@@ -1,4 +1,4 @@
-name: Build LobeChat for Termux (Bypass DB)
+name: Build LobeChat for Termux (Force Standalone)
 
 on:
   workflow_dispatch:
@@ -28,12 +28,64 @@ jobs:
       - name: Install Dependencies
         run: pnpm install
 
-      # 🔥 关键修改：直接使用 Next.js 构建，绕过 pnpm build 中的 db:migrate
-      - name: Build Standalone (Bypass DB)
+      # 🔥 核心修复：添加 DOCKER=true 环境变量
+      # 这会触发 LobeChat 的 next.config.mjs 开启 output: 'standalone'
+      - name: Build Standalone (Bypass DB Checks)
         run: npx next build
         env:
-          # 告诉 Next.js 生成独立运行包
+          # 关键变量：告诉 LobeChat 这是一个 Docker/Standalone 构建
+          DOCKER: true
+          
+          # 显式指定（双重保险）
           NEXT_OUTPUT: standalone
+          
+          # 绕过数据库检查
+          SKIP_ENV_VALIDATION: true
+          
+          # 必须的 Dummy 变量
+          AUTH_SECRET: "dummy_secret_for_build_process_32_chars_long"
+          KEY_VAULTS_SECRET: "dummy_secret_for_build_process_32_chars_long"
+          DATABASE_URL: "postgresql://postgres:password@localhost:5432/lobe"
+          APP_URL: "http://localhost:3000"
+          
+          # 增加内存限制，防止构建崩
+          NODE_OPTIONS: "--max-old-space-size=8192"
+
+      - name: Package Application
+        run: |
+          echo "📦 开始打包..."
+          # 检查 standalone 是否存在 (调试用)
+          ls -R .next/standalone || echo "❌ Standalone 目录依然不存在！"
+          
+          mkdir -p package/public
+          mkdir -p package/.next/static
+
+          # 1. 复制 Standalone 核心
+          # 使用 cp -r 复制 .next/standalone 下的所有内容（包含 node_modules 等）
+          cp -r .next/standalone/* package/
+
+          # 2. 复制静态资源 (Next.js 默认不打入 standalone，必须手动补)
+          # 注意：有时候 .next/static 已经在 standalone/.next/static 里了，但为了保险覆盖一次
+          cp -r .next/static package/.next/
+          cp -r public package/
+
+          # 3. 修复 Termux 兼容性
+          echo "🚫 删除 x64 架构的 sharp..."
+          rm -rf package/node_modules/sharp
+          rm -rf package/node_modules/@img/sharp-libvips-linux-x64
+
+          # 4. 压缩
+          echo "🗜️ 正在压缩..."
+          cd package
+          tar -czvf ../lobe-termux.tar.gz .
+          echo "✅ 打包完成！"
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lobechat-termux-final-v3
+          path: lobe-termux.tar.gz
+          retention-days: 3
           
           # 必须变量 (骗过 Next.js 的启动检查)
           AUTH_SECRET: "dummy_secret_for_build_process_32_chars_long"
