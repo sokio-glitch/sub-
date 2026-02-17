@@ -1,13 +1,12 @@
-name: Build LobeChat for Termux (Fixed)
+name: Build LobeChat for Termux (Final Fix)
 
 on:
-  workflow_dispatch: # 手动触发
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      # 1. 拉取代码
       - name: Checkout Source Code
         uses: actions/checkout@v4
         with:
@@ -15,7 +14,6 @@ jobs:
           ref: main
           fetch-depth: 1
 
-      # 2. 环境准备
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -30,10 +28,58 @@ jobs:
       - name: Install Dependencies
         run: pnpm install
 
-      # 3. 关键修复：替换过时的环境变量
+      # 3. 关键修复：根据报错设置 AUTH_SECRET
       - name: Build Standalone
         run: pnpm build
         env:
+          NEXT_OUTPUT: standalone
+          # 依然跳过验证，防止连接真实数据库
+          SKIP_ENV_VALIDATION: true
+          
+          # --- 核心修复 START ---
+          # 报错明确指出必须存在 AUTH_SECRET
+          AUTH_SECRET: "dummy_secret_for_build_process_32_chars_long"
+          # 为了保险起见，保留 KEY_VAULTS_SECRET
+          KEY_VAULTS_SECRET: "dummy_secret_for_build_process_32_chars_long"
+          # --- 核心修复 END ---
+
+          # 提供数据库 URL 格式欺骗验证
+          DATABASE_URL: "postgresql://postgres:password@localhost:5432/lobe"
+          APP_URL: "http://localhost:3000"
+
+      - name: Package Application
+        run: |
+          echo "📦 开始打包..."
+          mkdir -p package/public
+          mkdir -p package/.next/static
+
+          # 复制核心文件
+          # 注意：有时候 standalone 结构会包含 .next/standalone/lobe-chat，这里直接复制内容
+          cp -r .next/standalone/* package/
+
+          # 复制静态资源
+          cp -r .next/static package/.next/
+          
+          # 复制 Public
+          cp -r public package/
+
+          # ⚠️ 删除 sharp (Termux 需要自行安装)
+          echo "🚫 删除 x64 架构的 sharp..."
+          rm -rf package/node_modules/sharp
+          rm -rf package/node_modules/@img/sharp-libvips-linux-x64
+
+          # 压缩
+          echo "🗜️ 正在压缩..."
+          cd package
+          tar -czvf ../lobe-termux.tar.gz .
+          echo "✅ 打包完成！"
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lobechat-build-fixed-v2
+          path: lobe-termux.tar.gz
+          retention-days: 3
           NEXT_OUTPUT: standalone
           # 依然保留跳过验证，防止校验数据库连接
           SKIP_ENV_VALIDATION: true
