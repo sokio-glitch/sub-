@@ -43,8 +43,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: lobe-chat-build
-          path: lobe-chat/lobe-chat-build.zip      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: lobe-chat-build
-          path: lobe-chat-build.zip
+          path: lobe-chat/lobe-chat-build.zip
