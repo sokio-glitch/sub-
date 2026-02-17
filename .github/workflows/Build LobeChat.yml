@@ -1,4 +1,4 @@
-name: Build LobeChat for Termux (Final Fix)
+name: Build LobeChat for Termux (Bun + DB Fix)
 
 on:
   workflow_dispatch:
@@ -6,6 +6,22 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # 1. 新增：启动一个临时的 Postgres 服务
+    # LobeChat 构建脚本需要连接数据库生成 Schema 或迁移，我们给它一个空的 DB 玩
+    services:
+      postgres:
+        image: postgres:latest
+        env:
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: lobe
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
       - name: Checkout Source Code
         uses: actions/checkout@v4
@@ -13,6 +29,13 @@ jobs:
           repository: lobehub/lobe-chat
           ref: main
           fetch-depth: 1
+
+      # 2. 新增：安装 Bun 环境
+      # 解决 "sh: 1: bun: not found" 错误
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: latest
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -28,12 +51,50 @@ jobs:
       - name: Install Dependencies
         run: pnpm install
 
-      # 3. 关键修复：根据报错设置 AUTH_SECRET
       - name: Build Standalone
         run: pnpm build
         env:
           NEXT_OUTPUT: standalone
-          # 依然跳过验证，防止连接真实数据库
+          SKIP_ENV_VALIDATION: true
+          
+          # 认证密钥 (必须提供)
+          AUTH_SECRET: "dummy_secret_for_build_process_32_chars_long"
+          KEY_VAULTS_SECRET: "dummy_secret_for_build_process_32_chars_long"
+          
+          # 数据库连接 (指向上面定义的临时服务)
+          # 注意：这里连接的是 localhost:5432 (Github Action 的 Service 会映射到这里)
+          DATABASE_URL: "postgresql://postgres:password@localhost:5432/lobe"
+          
+          APP_URL: "http://localhost:3000"
+
+      - name: Package Application
+        run: |
+          echo "📦 开始打包..."
+          mkdir -p package/public
+          mkdir -p package/.next/static
+
+          # 复制核心文件
+          cp -r .next/standalone/* package/
+          cp -r .next/static package/.next/
+          cp -r public package/
+
+          # ⚠️ 删除 sharp (Termux ARM64 需自行安装)
+          echo "🚫 删除 x64 架构的 sharp..."
+          rm -rf package/node_modules/sharp
+          rm -rf package/node_modules/@img/sharp-libvips-linux-x64
+
+          # 压缩
+          echo "🗜️ 正在压缩..."
+          cd package
+          tar -czvf ../lobe-termux.tar.gz .
+          echo "✅ 打包完成！"
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lobechat-build-fixed-bun
+          path: lobe-termux.tar.gz
+          retention-days: 3
           SKIP_ENV_VALIDATION: true
           
           # --- 核心修复 START ---
