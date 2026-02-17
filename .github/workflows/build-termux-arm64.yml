@@ -1,0 +1,69 @@
+name: Build LobeChat for Termux (ARM64 Native)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-arm64:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+        with:
+          repository: lobehub/lobe-chat
+          ref: main
+          fetch-depth: 1
+
+      # 1. 启用 QEMU (让 GitHub 的 x86 机器能构建 ARM64)
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      # 2. 启用 Docker Buildx
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # 3. 构建并导出文件
+      # 注意：这步会比较慢 (20-40分钟)，因为是在模拟 ARM CPU
+      - name: Build and Export
+        run: |
+          echo "🐢 开始构建 ARM64 版本 (请耐心等待)..."
+          
+          # 创建一个输出目录
+          mkdir -p ./output
+          
+          # 使用 buildx 构建，并直接将构建结果导出到本地目录
+          # LobeChat 的 Dockerfile 最终产物在 /app
+          # 我们把镜像里的文件系统直接 dump 出来
+          docker buildx build \
+             --platform linux/arm64 \
+             --output type=tar,dest=./lobe-arm64.tar \
+             .
+
+      # 4. 解包并重新打包 (为了减小体积和清理结构)
+      - name: Repackage
+        run: |
+          mkdir -p temp_extract
+          tar -xf lobe-arm64.tar -C temp_extract
+          
+          mkdir -p final_package
+          
+          echo "📂 提取核心文件..."
+          # Docker 导出的 tar 包含整个 Linux 系统结构
+          # 我们只需要 /app 目录下的内容
+          cp -r temp_extract/app/* final_package/
+          
+          # 验证一下架构 (确保是 ARM64)
+          echo "🧐 检查 sharp 架构..."
+          file final_package/node_modules/sharp/build/Release/sharp-linux-arm64.node || echo "⚠️ 没找到 sharp 二进制，可能路径不同"
+
+          echo "📦 最终压缩..."
+          cd final_package
+          tar -czvf ../lobe-chat-termux-arm64.tar.gz .
+
+      # 5. 上传
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lobe-chat-termux-arm64
+          path: lobe-chat-termux-arm64.tar.gz
+          retention-days: 3
