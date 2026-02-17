@@ -1,4 +1,4 @@
-name: Build LobeChat from Source
+name: Build LobeChat Standalone
 
 on:
   workflow_dispatch:
@@ -8,7 +8,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Clone Source
+      - name: Clone LobeChat
         run: |
           git clone https://github.com/lobehub/lobe-chat.git
           cd lobe-chat
@@ -18,23 +18,47 @@ jobs:
         with:
           node-version: 20
 
-      - name: Enable pnpm (use latest v9)
+      - name: Enable pnpm v9
         run: |
           corepack enable
           corepack prepare pnpm@9 --activate
           pnpm -v
 
-      - name: Install Dependencies
+      - name: Install dependencies
         run: |
           cd lobe-chat
           pnpm install --no-frozen-lockfile
 
-      - name: Build
+      - name: Build (standalone)
         run: |
           cd lobe-chat
           export NODE_OPTIONS="--max-old-space-size=4096"
           pnpm build
 
+      - name: Prepare standalone package
+        run: |
+          cd lobe-chat
+          mkdir phone-package
+
+          # 复制 standalone server
+          cp -r .next/standalone/* phone-package/
+
+          # 复制静态文件
+          mkdir -p phone-package/.next
+          cp -r .next/static phone-package/.next/
+
+          # 复制 public 资源
+          cp -r public phone-package/
+
+          # 打包
+          cd phone-package
+          zip -r ../../lobe-chat-phone.zip .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lobe-chat-phone
+          path: lobe-chat-phone.zip
       - name: Compress
         run: |
           cd lobe-chat
