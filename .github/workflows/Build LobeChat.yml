@@ -1,66 +1,56 @@
-name: Build LobeChat via Docker
+name: Build LobeChat for Termux (No Release)
 
 on:
-  workflow_dispatch:
+  workflow_dispatch: # 手动触发
 
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Clone LobeChat
-        run: |
-          git clone https://github.com/lobehub/lobe-chat.git
-          cd lobe-chat
+      - uses: actions/checkout@v4
 
-      - name: Build Docker Image
-        run: |
-          cd lobe-chat
-          docker build -t lobe-chat .
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
 
-      - name: Extract standalone build
-        run: |
-          docker create --name temp lobe-chat
-          docker cp temp:/app/.next ./output
-          docker rm temp
-          zip -r lobe-chat-phone.zip output
+      - name: Install pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 8
 
-      - name: Upload
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Build Standalone
+        run: pnpm build
+        env:
+          NEXT_OUTPUT: standalone
+
+      # 📦 打包环节：重组文件结构
+      - name: Package Application
+        run: |
+          mkdir -p package/public
+          mkdir -p package/.next/static
+          
+          # 1. 复制 Standalone 核心
+          cp -r .next/standalone/* package/
+          # 2. 复制静态资源 (解决样式丢失)
+          cp -r .next/static/* package/.next/static/
+          # 3. 复制 Public (解决图标丢失)
+          cp -r public/* package/public/
+          
+          # 4. 删除 x64 架构的 sharp (手机是 arm64，需要重装)
+          rm -rf package/node_modules/sharp
+
+          # 5. 压缩
+          cd package
+          tar -czvf ../lobe-termux.tar.gz .
+
+      # 📤 上传产物 (只在 Actions 页面可见)
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: lobe-chat-phone
-          path: lobe-chat-phone.zip
-      - name: Prepare standalone package
-        run: |
-          cd lobe-chat
-          mkdir phone-package
-
-          # 复制 standalone server
-          cp -r .next/standalone/* phone-package/
-
-          # 复制静态文件
-          mkdir -p phone-package/.next
-          cp -r .next/static phone-package/.next/
-
-          # 复制 public 资源
-          cp -r public phone-package/
-
-          # 打包
-          cd phone-package
-          zip -r ../../lobe-chat-phone.zip .
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: lobe-chat-phone
-          path: lobe-chat-phone.zip
-      - name: Compress
-        run: |
-          cd lobe-chat
-          zip -r lobe-chat-build.zip .next public package.json pnpm-lock.yaml
-
-      - name: Upload
-        uses: actions/upload-artifact@v4
-        with:
-          name: lobe-chat-build
-          path: lobe-chat/lobe-chat-build.zip
+          name: lobechat-build
+          path: lobe-termux.tar.gz
+          retention-days: 3 # 设置保留3天，节省空间
