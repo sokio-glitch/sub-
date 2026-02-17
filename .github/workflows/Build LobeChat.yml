@@ -1,4 +1,4 @@
-name: Build LobeChat for Termux (No Release)
+name: Build LobeChat for Termux (Fixed)
 
 on:
   workflow_dispatch: # 手动触发
@@ -7,50 +7,70 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      # 1. 关键修复：显式指定拉取官方仓库代码
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+        with:
+          repository: lobehub/lobe-chat  # 强制拉取官方源码
+          ref: main                      # 拉取最新主分支
+          fetch-depth: 1                 # 浅克隆，加快速度
 
+      # 2. 环境准备
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 20               # LobeChat 需要 Node 20+
 
       - name: Install pnpm
         uses: pnpm/action-setup@v2
         with:
-          version: 8
+          version: 9                     # 更新到 pnpm 9
+          run_install: false
 
-      - name: Install dependencies
+      - name: Install Dependencies
         run: pnpm install
 
+      # 3. 关键修复：构建并绕过严格的环境变量检查
+      # LobeChat 编译时通常需要连接 DB，我们用假数据欺骗它
       - name: Build Standalone
         run: pnpm build
         env:
           NEXT_OUTPUT: standalone
+          # 绕过 T3 Env 或 Zod 的校验
+          SKIP_ENV_VALIDATION: true 
+          # 提供假的必须变量，防止构建崩溃
+          DATABASE_URL: "postgresql://postgres:password@localhost:5432/lobe"
+          KEY_VAULTS_SECRET: "dummy_secret_for_build_process"
+          NEXT_AUTH_SECRET: "dummy_secret_for_build_process"
+          APP_URL: "http://localhost:3000"
 
-      # 📦 打包环节：重组文件结构
+      # 4. 打包处理 (解决架构不兼容问题)
       - name: Package Application
         run: |
+          echo "📦 开始打包..."
           mkdir -p package/public
           mkdir -p package/.next/static
-          
-          # 1. 复制 Standalone 核心
+
+          # 复制核心文件
           cp -r .next/standalone/* package/
-          # 2. 复制静态资源 (解决样式丢失)
+          # 复制静态资源 (解决样式丢失)
           cp -r .next/static/* package/.next/static/
-          # 3. 复制 Public (解决图标丢失)
+          # 复制 Public (解决图标丢失)
           cp -r public/* package/public/
           
-          # 4. 删除 x64 架构的 sharp (手机是 arm64，需要重装)
+          # ⚠️ 关键：删除 sharp (Linux x64)，防止在手机 (ARM64) 上报错
+          # 我们会在 Termux 脚本里重新安装它
           rm -rf package/node_modules/sharp
 
-          # 5. 压缩
+          # 压缩
           cd package
           tar -czvf ../lobe-termux.tar.gz .
+          echo "✅ 打包完成！"
 
-      # 📤 上传产物 (只在 Actions 页面可见)
+      # 5. 上传产物
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: lobechat-build
+          name: lobechat-build-fixed
           path: lobe-termux.tar.gz
-          retention-days: 3 # 设置保留3天，节省空间
+          retention-days: 3
