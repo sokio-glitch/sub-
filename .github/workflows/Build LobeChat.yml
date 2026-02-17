@@ -8,38 +8,39 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Clone LobeChat
+      - name: Clone Source
         run: |
           git clone https://github.com/lobehub/lobe-chat.git
           cd lobe-chat
-          ls
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v2
-        with:
-          version: 8
 
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 18
+          node-version: 20
+
+      - name: Enable pnpm (use latest v9)
+        run: |
+          corepack enable
+          corepack prepare pnpm@9 --activate
+          pnpm -v
 
       - name: Install Dependencies
         run: |
           cd lobe-chat
-          pnpm install
+          pnpm install --no-frozen-lockfile
 
       - name: Build
         run: |
           cd lobe-chat
+          export NODE_OPTIONS="--max-old-space-size=4096"
           pnpm build
 
-      - name: Compress Build Output
+      - name: Compress
         run: |
           cd lobe-chat
           zip -r lobe-chat-build.zip .next public package.json pnpm-lock.yaml
 
-      - name: Upload Artifact
+      - name: Upload
         uses: actions/upload-artifact@v4
         with:
           name: lobe-chat-build
