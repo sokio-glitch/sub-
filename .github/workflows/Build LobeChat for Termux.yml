@@ -1,4 +1,4 @@
-name: Build LobeChat Termux (Force Install)
+name: Build LobeChat Termux (Fixed Secret)
 
 on:
   workflow_dispatch:
@@ -13,61 +13,51 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. 下载源码
       - name: Checkout Source
         uses: actions/checkout@v4
         with:
           repository: lobehub/lobehub
           ref: ${{ inputs.ref }}
 
-      # 2. 安装 pnpm
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
 
-      # 3. 安装 Node.js
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
 
-      # 4. 安装依赖 (关键修改：--no-frozen-lockfile)
-      # 允许修改 lockfile，忽略配置不匹配的问题
       - name: Install Dependencies
         run: pnpm install --no-frozen-lockfile
 
-      # 5. 构建 Standalone
+      # --- 修复点在这里 ---
       - name: Build Standalone
         run: pnpm run build:docker
         env:
-          # 防止内存溢出
+          # 1. 防止内存溢出
           NODE_OPTIONS: "--max-old-space-size=8192"
+          # 2. 修复 KEY_VAULTS_SECRET 报错 (填入一个假的 32位 base64 密钥即可通过构建)
+          KEY_VAULTS_SECRET: "K3U6M8Cj7xQ9vZ1wE4yB0aN2lF5gH8iJ3kL6oP9rS2u="
+          # 3. 补充 APP_URL 防止其他页面生成报错
+          APP_URL: "http://localhost:3000"
 
-      # 6. 打包文件
       - name: Prepare Artifact
         run: |
           mkdir -p lobe-termux
           
-          # 复制核心 Standalone 文件
           cp -r .next/standalone/* lobe-termux/
           
-          # 复制静态资源 (必须)
           mkdir -p lobe-termux/.next
           cp -r .next/static lobe-termux/.next/static
           
-          # 复制 Public 资源
           cp -r public lobe-termux/public
           
-          # 复制配置文件
           cp .env.example lobe-termux/.env
           
-          # ---------------------------------------------------
-          # 关键操作：删除不兼容的依赖
-          # ---------------------------------------------------
-          # 这里的 sharp 是 x64 的，手机跑不起来，必须删掉
+          # 删除不兼容依赖
           rm -rf lobe-termux/node_modules/sharp
           rm -rf lobe-termux/node_modules/@img
 
-      # 7. 上传结果
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
