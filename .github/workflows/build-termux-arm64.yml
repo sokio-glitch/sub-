@@ -1,4 +1,4 @@
-name: Build LobeChat for Termux (ARM64 Native)
+name: Build LobeChat for Termux (ARM64 Fixed)
 
 on:
   workflow_dispatch:
@@ -14,26 +14,77 @@ jobs:
           ref: main
           fetch-depth: 1
 
-      # 1. 启用 QEMU (让 GitHub 的 x86 机器能构建 ARM64)
+      # 🔥 核心修复：创建 10GB 的 Swap 空间 (虚拟内存)
+      # 这能防止 QEMU 模拟构建时内存不足崩溃
+      - name: Enable Swap Space
+        run: |
+          sudo fallocate -l 10G /swapfile
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
+          sudo swapon --show
+          echo "✅ Swap memory enabled!"
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
 
-      # 2. 启用 Docker Buildx
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # 3. 构建并导出文件
-      # 注意：这步会比较慢 (20-40分钟)，因为是在模拟 ARM CPU
+      # 🔥 核心修复：传递构建参数，限制内存，跳过检查
       - name: Build and Export
         run: |
-          echo "🐢 开始构建 ARM64 版本 (请耐心等待)..."
+          echo "🐢 开始构建 ARM64 版本 (预计耗时 20-40 分钟)..."
           
-          # 创建一个输出目录
           mkdir -p ./output
           
-          # 使用 buildx 构建，并直接将构建结果导出到本地目录
-          # LobeChat 的 Dockerfile 最终产物在 /app
-          # 我们把镜像里的文件系统直接 dump 出来
+          # 增加 --build-arg 限制内存和跳过验证
+          docker buildx build \
+             --platform linux/arm64 \
+             --output type=tar,dest=./lobe-arm64.tar \
+             --build-arg NODE_OPTIONS="--max-old-space-size=4096" \
+             --build-arg SKIP_ENV_VALIDATION=true \
+             --build-arg NEXT_PUBLIC_ANALYTICS_GOOGLE="" \
+             --build-arg NEXT_PUBLIC_ANALYTICS_VERCEL="" \
+             .
+
+      - name: Repackage
+        run: |
+          echo "📂 解包中..."
+          mkdir -p temp_extract
+          tar -xf lobe-arm64.tar -C temp_extract
+          
+          mkdir -p final_package
+          
+          echo "📂 提取核心文件..."
+          # 注意：有时候 Docker 导出的结构会有变化，这里尝试匹配 app 目录
+          # 如果 Dockerfile WORKDIR 是 /app，则内容在 /app 下
+          if [ -d "temp_extract/app" ]; then
+            cp -r temp_extract/app/* final_package/
+          else
+            # 备用方案：如果结构不同，尝试直接复制所有
+            echo "⚠️ 标准路径未找到，尝试全量搜索..."
+            cp -r temp_extract/* final_package/ || true
+          fi
+          
+          # 清理不必要的文件 (减小体积)
+          rm -rf final_package/src || true
+          rm -rf final_package/.git || true
+          
+          echo "🧐 检查 sharp 架构..."
+          # 查找 sharp.node 文件以验证架构
+          find final_package -name "sharp-linux-arm64.node" || echo "⚠️ 警告：未找到 ARM64 sharp，请检查日志"
+
+          echo "📦 最终压缩..."
+          cd final_package
+          tar -czvf ../lobe-chat-termux-arm64.tar.gz .
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lobe-chat-termux-arm64
+          path: lobe-chat-termux-arm64.tar.gz
+          retention-days: 3
           docker buildx build \
              --platform linux/arm64 \
              --output type=tar,dest=./lobe-arm64.tar \
