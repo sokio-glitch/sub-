@@ -1,4 +1,4 @@
-name: Build LobeChat Termux (Stable)
+name: Build LobeChat Termux (Force Install)
 
 on:
   workflow_dispatch:
@@ -13,33 +13,33 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. 下载 LobeChat 源码
+      # 1. 下载源码
       - name: Checkout Source
         uses: actions/checkout@v4
         with:
           repository: lobehub/lobehub
           ref: ${{ inputs.ref }}
 
-      # 2. 安装 pnpm (自动识别版本)
+      # 2. 安装 pnpm
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
 
-      # 3. 安装 Node.js (移除 cache 选项，防止报错)
+      # 3. 安装 Node.js
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          # cache: 'pnpm'  <-- 删除了这一行，彻底解决找不到锁文件的问题
 
-      # 4. 安装依赖
+      # 4. 安装依赖 (关键修改：--no-frozen-lockfile)
+      # 允许修改 lockfile，忽略配置不匹配的问题
       - name: Install Dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --no-frozen-lockfile
 
-      # 5. 开始构建
+      # 5. 构建 Standalone
       - name: Build Standalone
         run: pnpm run build:docker
         env:
-          # 给足内存
+          # 防止内存溢出
           NODE_OPTIONS: "--max-old-space-size=8192"
 
       # 6. 打包文件
@@ -47,20 +47,23 @@ jobs:
         run: |
           mkdir -p lobe-termux
           
-          # 复制核心文件
+          # 复制核心 Standalone 文件
           cp -r .next/standalone/* lobe-termux/
           
-          # 复制静态资源
+          # 复制静态资源 (必须)
           mkdir -p lobe-termux/.next
           cp -r .next/static lobe-termux/.next/static
           
-          # 复制 Public
+          # 复制 Public 资源
           cp -r public lobe-termux/public
           
-          # 复制配置
+          # 复制配置文件
           cp .env.example lobe-termux/.env
           
-          # 删除不兼容的依赖 (Termux 必须重装 sharp)
+          # ---------------------------------------------------
+          # 关键操作：删除不兼容的依赖
+          # ---------------------------------------------------
+          # 这里的 sharp 是 x64 的，手机跑不起来，必须删掉
           rm -rf lobe-termux/node_modules/sharp
           rm -rf lobe-termux/node_modules/@img
 
