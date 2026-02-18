@@ -1,6 +1,5 @@
-name: Build LobeChat Termux (Fixed Secret)
-
-on:
+name: Build LobeChat Termux (Optimized)
+on: 
   workflow_dispatch:
     inputs:
       ref:
@@ -11,56 +10,112 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-
+    permissions:
+      contents: read
+      actions: write
+    
     steps:
+      - name: Validate inputs
+        shell: bash
+        run: |
+          if [[ ! "${{ inputs.ref }}" =~ ^[a-zA-Z0-9._/-]+$ ]]; then
+            echo "Error: Invalid ref format" >&2
+            exit 1
+          fi
+
       - name: Checkout Source
         uses: actions/checkout@v4
         with:
-          repository: lobehub/lobehub
+          repository: lobehub/lobehub  # ⚠️ 考虑 pin 到特定 commit
           ref: ${{ inputs.ref }}
+          fetch-depth: 1
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
+        with:
+          version: 8
+          run_install: false
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: '20.11.0'
+          check-latest: true
 
       - name: Install Dependencies
-        run: pnpm install --no-frozen-lockfile
+        run: |
+          pnpm install --frozen-lockfile || pnpm install --no-frozen-lockfile
 
-      # --- 修复点在这里 ---
       - name: Build Standalone
         run: pnpm run build:docker
         env:
-          # 1. 防止内存溢出
           NODE_OPTIONS: "--max-old-space-size=8192"
-          # 2. 修复 KEY_VAULTS_SECRET 报错 (填入一个假的 32位 base64 密钥即可通过构建)
-          KEY_VAULTS_SECRET: "K3U6M8Cj7xQ9vZ1wE4yB0aN2lF5gH8iJ3kL6oP9rS2u="
-          # 3. 补充 APP_URL 防止其他页面生成报错
+          NEXT_TELEMETRY_DISABLED: 1
+          DATABASE_URL: "postgresql://postgres:password@localhost:5432/postgres"
+          # ⚠️ 使用 GitHub Secret 而非硬编码
+          KEY_VAULTS_SECRET: ${{ secrets.KEY_VAULTS_SECRET || 'K3U6M8Cj7xQ9vZ1wE4yB0aN2lF5gH8iJ3kL6oP9rS2u=' }}
           APP_URL: "http://localhost:3000"
+          NEXT_ADAPTER_IDENTIFIER: "docker"
+
+      - name: Verify Build
+        run: |
+          test -f .next/standalone/server.js || (echo "Error: server.js not found" && exit 1)
+          test -d .next/static || (echo "Error: static directory not found" && exit 1)
 
       - name: Prepare Artifact
+        shell: bash
         run: |
-          mkdir -p lobe-termux
+          set -euo pipefail
           
-          cp -r .next/standalone/* lobe-termux/
+          # 创建打包根目录
+          mkdir -p lobe-chat-prod
           
-          mkdir -p lobe-termux/.next
-          cp -r .next/static lobe-termux/.next/static
+          # 拷贝 Standalone 核心
+          cp -r .next/standalone/. lobe-chat-prod/
           
-          cp -r public lobe-termux/public
+          # 拷贝静态资源
+          mkdir -p lobe-chat-prod/.next/static
+          cp -r .next/static/. lobe-chat-prod/.next/static/
           
-          cp .env.example lobe-termux/.env
+          # 拷贝公共文件
+          cp -r public lobe-chat-prod/public
           
-          # 删除不兼容依赖
-          rm -rf lobe-termux/node_modules/sharp
-          rm -rf lobe-termux/node_modules/@img
+          # 注入默认配置项（带错误处理）
+          if [ -f .env.example ]; then
+            cp .env.example lobe-chat-prod/.env
+          else
+            echo "# No .env.example found, creating empty env file" > lobe-chat-prod/.env
+          fi
+          
+          # 清理不兼容的二进制文件
+          rm -rf lobe-chat-prod/node_modules/sharp
+          rm -rf lobe-chat-prod/node_modules/@img
+          
+          # 额外的平台特定清理（可选但推荐）
+          find lobe-chat-prod/node_modules -name "*.node" -type f | while read -r file; do
+            if file "$file" | grep -q "ELF.*x86-64"; then
+              echo "Removing x86_64 binary: $file"
+              rm -f "$file"
+            fi
+          done || true
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: lobe-chat-termux
-          path: lobe-termux
+          path: lobe-chat-prod
           compression-level: 9
+          if-no-files-found: error  # 确保文件不存在时报错
