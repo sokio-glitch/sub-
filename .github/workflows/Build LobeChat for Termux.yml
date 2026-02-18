@@ -1,12 +1,11 @@
-name: Build LobeChat for Termux (No Fork)
+name: Build LobeChat for Termux (No Fork - Fixed)
 
 on:
   workflow_dispatch:
     inputs:
-      # 允许你在手动触发时指定版本，默认是 main 分支
       ref:
-        description: 'Build Branch or Tag (e.g., main, v1.19.0)'
-        required: true
+        description: 'Build Branch or Tag (default: main)'
+        required: false
         default: 'main'
 
 jobs:
@@ -14,76 +13,65 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # --- 关键步骤：下载 LobeChat 源码 ---
+      # 1. 直接下载代码到根目录 (去掉 path 参数)
       - name: Checkout LobeChat Source
         uses: actions/checkout@v4
         with:
-          repository: lobehub/lobehub  # 指定官方仓库地址
-          ref: ${{ inputs.ref }}       # 使用你输入的版本
-          path: ./lobe-src             # 把代码下载到 lobe-src 目录，保持环境整洁
+          repository: lobehub/lobehub
+          ref: ${{ inputs.ref }}
 
-      # --- 环境配置 ---
+      # 2. 安装 pnpm
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
           version: 9
 
+      # 3. 配置 Node (现在能自动找到 pnpm-lock.yaml 了)
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: 'pnpm'
-          cache-dependency-path: './lobe-src/pnpm-lock.yaml' # 指定 lock 文件路径
 
-      # --- 安装依赖与构建 ---
+      # 4. 安装依赖
       - name: Install Dependencies
-        working-directory: ./lobe-src  # 进入下载的目录操作
         run: pnpm install --frozen-lockfile
 
-      - name: Build Standalone
-        working-directory: ./lobe-src
-        run: pnpm run build:docker     # 这个命令包含了 next build 并输出 standalone
+      # 5. 构建 Standalone
+      - name: Build Application
+        run: pnpm run build:docker
         env:
+          # 增加内存限制防止崩溃
           NODE_OPTIONS: "--max-old-space-size=8192"
 
-      # --- 打包处理 (核心步骤) ---
+      # 6. 打包并剔除不兼容依赖 (核心步骤)
       - name: Prepare Termux Artifact
-        working-directory: ./lobe-src
         run: |
-          mkdir -p ../lobe-termux
+          mkdir -p lobe-termux
           
-          echo "正在复制核心文件..."
-          # 复制 Standalone 构建产物
-          cp -r .next/standalone/* ../lobe-termux/
+          echo "Copying standalone files..."
+          # 复制核心逻辑
+          cp -r .next/standalone/* lobe-termux/
           
-          # 复制静态资源 (Next.js Standalone 运行必须)
-          mkdir -p ../lobe-termux/.next
-          cp -r .next/static ../lobe-termux/.next/static
+          # 复制静态资源 (必须)
+          mkdir -p lobe-termux/.next
+          cp -r .next/static lobe-termux/.next/static
           
-          # 复制 Public 资源 (图标、Manifest 等)
-          cp -r public ../lobe-termux/public
+          # 复制 Public 资源
+          cp -r public lobe-termux/public
           
-          # 复制配置文件（如果有 .env.example）
-          [ -f .env.example ] && cp .env.example ../lobe-termux/.env
+          # 复制配置文件
+          cp .env.example lobe-termux/.env
           
-          # -------------------------------------------------------
-          # 关键操作：删除 x64 架构的 sharp
-          # -------------------------------------------------------
-          echo "正在移除不兼容的依赖..."
-          rm -rf ../lobe-termux/node_modules/sharp
-          rm -rf ../lobe-termux/node_modules/@img
-          
-          # 创建一个简易说明书
-          echo "1. unzip file" > ../lobe-termux/INSTALL.txt
-          echo "2. pkg install nodejs-lts" >> ../lobe-termux/INSTALL.txt
-          echo "3. npm install sharp (IMPORTANT!)" >> ../lobe-termux/INSTALL.txt
-          echo "4. export PORT=3010 HOSTNAME=0.0.0.0" >> ../lobe-termux/INSTALL.txt
-          echo "5. node server.js" >> ../lobe-termux/INSTALL.txt
+          echo "Removing x64 binaries..."
+          # --- 关键：删除 x64 的 sharp，强制你在手机上重装 ---
+          rm -rf lobe-termux/node_modules/sharp
+          rm -rf lobe-termux/node_modules/@img
 
-      # --- 上传结果 ---
+      # 7. 上传
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: lobe-chat-termux-build
-          path: ./lobe-termux
+          path: lobe-termux
           compression-level: 9
