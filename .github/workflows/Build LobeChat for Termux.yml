@@ -1,10 +1,10 @@
-name: Build LobeChat for Termux (Auto-Version)
+name: Build LobeChat Termux (Stable)
 
 on:
   workflow_dispatch:
     inputs:
       ref:
-        description: 'Build Branch or Tag (default: main)'
+        description: 'Branch (default: main)'
         required: false
         default: 'main'
 
@@ -13,57 +13,54 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. 下载代码
-      - name: Checkout LobeChat Source
+      # 1. 下载 LobeChat 源码
+      - name: Checkout Source
         uses: actions/checkout@v4
         with:
           repository: lobehub/lobehub
           ref: ${{ inputs.ref }}
 
-      # 2. 安装 pnpm (自动识别 package.json 中的版本)
+      # 2. 安装 pnpm (自动识别版本)
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
-        # 这里去掉了 version: 9，让它自动读取项目要求的版本
 
-      # 3. 配置 Node.js
+      # 3. 安装 Node.js (移除 cache 选项，防止报错)
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: 'pnpm'
+          # cache: 'pnpm'  <-- 删除了这一行，彻底解决找不到锁文件的问题
 
       # 4. 安装依赖
       - name: Install Dependencies
         run: pnpm install --frozen-lockfile
 
-      # 5. 构建 Standalone
-      - name: Build Application
+      # 5. 开始构建
+      - name: Build Standalone
         run: pnpm run build:docker
         env:
-          # 给予足够的内存
+          # 给足内存
           NODE_OPTIONS: "--max-old-space-size=8192"
 
-      # 6. 打包并剔除不兼容依赖
-      - name: Prepare Termux Artifact
+      # 6. 打包文件
+      - name: Prepare Artifact
         run: |
           mkdir -p lobe-termux
           
-          echo "Copying standalone files..."
-          # 复制核心逻辑
+          # 复制核心文件
           cp -r .next/standalone/* lobe-termux/
           
-          # 复制静态资源 (必须)
+          # 复制静态资源
           mkdir -p lobe-termux/.next
           cp -r .next/static lobe-termux/.next/static
           
-          # 复制 Public 资源
+          # 复制 Public
           cp -r public lobe-termux/public
           
-          # 复制配置文件
+          # 复制配置
           cp .env.example lobe-termux/.env
           
-          echo "Removing x64 binaries..."
-          # --- 关键：删除 x64 的 sharp ---
+          # 删除不兼容的依赖 (Termux 必须重装 sharp)
           rm -rf lobe-termux/node_modules/sharp
           rm -rf lobe-termux/node_modules/@img
 
@@ -71,6 +68,6 @@ jobs:
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: lobe-chat-termux-build
+          name: lobe-chat-termux
           path: lobe-termux
           compression-level: 9
